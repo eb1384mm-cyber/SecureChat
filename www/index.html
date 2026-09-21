@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SecureChat</title>
+    <!-- اضافه کردن کتابخانه استاندارد رمزنگاری -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <style>
+        :root {
+            --bg-color: #121212;
+            --surface-color: #1e1e1e;
+            --primary-color: #bb86fc;
+            --text-color: #ffffff;
+            --text-muted: #a0a0a0;
+            --error-color: #cf6679;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        body { background-color: var(--bg-color); color: var(--text-color); display: flex; justify-content: center; height: 100vh; }
+        
+        /* شبیه‌ساز صفحه موبایل */
+        #app-container { width: 100%; max-width: 450px; background-color: var(--surface-color); display: flex; flex-direction: column; height: 100%; box-shadow: 0 0 20px rgba(0,0,0,0.5); }
+        
+        .header { padding: 20px; text-align: center; background-color: #2c2c2c; font-weight: bold; font-size: 1.2rem; }
+        
+        .tabs { display: flex; background-color: #2c2c2c; }
+        .tab-btn { flex: 1; padding: 15px 0; background: none; border: none; color: var(--text-muted); font-size: 1rem; cursor: pointer; border-bottom: 2px solid transparent; transition: 0.3s; }
+        .tab-btn.active { color: var(--primary-color); border-bottom: 2px solid var(--primary-color); }
+        
+        .tab-content { flex: 1; padding: 20px; display: none; overflow-y: auto; }
+        .tab-content.active { display: block; }
+        
+        label { display: block; margin-bottom: 8px; color: var(--text-muted); font-size: 0.9rem; }
+        textarea, input { width: 100%; background-color: #2c2c2c; border: 1px solid #3c3c3c; color: var(--text-color); padding: 12px; border-radius: 8px; margin-bottom: 20px; font-size: 1rem; resize: vertical; }
+        textarea:focus, input:focus { outline: none; border-color: var(--primary-color); }
+        
+        button.action-btn { width: 100%; padding: 14px; background-color: var(--primary-color); color: #000; border: none; border-radius: 8px; font-size: 1.1rem; font-weight: bold; cursor: pointer; margin-bottom: 10px; }
+        button.action-btn:active { opacity: 0.8; }
+        button.secondary-btn { background-color: transparent; border: 1px solid var(--primary-color); color: var(--primary-color); }
+        
+        .result-box { display: none; margin-top: 10px; }
+    </style>
+</head>
+<body>
+
+<div id="app-container">
+    <div class="header" id="app-title">پیام‌رسان امن (AES-256)</div>
+    
+    <div class="tabs">
+        <button class="tab-btn active" onclick="switchTab('encode')" id="tab-encode-text">کدگذاری</button>
+        <button class="tab-btn" onclick="switchTab('decode')" id="tab-decode-text">کدشکن</button>
+        <button class="tab-btn" onclick="switchTab('settings')" id="tab-settings-text">تنظیمات</button>
+    </div>
+
+    <!-- تب کدگذاری -->
+    <div id="tab-encode" class="tab-content active">
+        <label id="lbl-enc-input">متن خود را وارد کنید:</label>
+        <textarea id="enc-input" rows="4" placeholder="پیام محرمانه شما..."></textarea>
+        
+        <button class="action-btn" onclick="encodeMessage()" id="btn-enc">رمزگذاری</button>
+        
+        <div class="result-box" id="enc-result-box">
+            <label id="lbl-enc-output">متن رمزگذاری شده:</label>
+            <textarea id="enc-output" rows="4" readonly></textarea>
+            <button class="action-btn secondary-btn" onclick="copyToClipboard('enc-output')" id="btn-enc-copy">کپی در کلیپ‌بورد</button>
+        </div>
+    </div>
+
+    <!-- تب کدشکن -->
+    <div id="tab-decode" class="tab-content">
+        <label id="lbl-dec-input">کد را اینجا پیست کنید:</label>
+        <textarea id="dec-input" rows="4" placeholder="U2FsdGVkX1..."></textarea>
+        
+        <button class="action-btn" onclick="decodeMessage()" id="btn-dec">رمزگشایی</button>
+        
+        <div class="result-box" id="dec-result-box">
+            <label id="lbl-dec-output">پیام اصلی:</label>
+            <textarea id="dec-output" rows="4" readonly></textarea>
+            <button class="action-btn secondary-btn" onclick="copyToClipboard('dec-output')" id="btn-dec-copy">کپی در کلیپ‌بورد</button>
+        </div>
+    </div>
+
+    <!-- تب تنظیمات -->
+    <div id="tab-settings" class="tab-content">
+        <label id="lbl-password">رمز عبور مشترک (Secret Key):</label>
+        <input type="password" id="secret-key" placeholder="یک رمز قوی وارد کنید..." value="DefaultKey123!">
+        <p style="font-size: 0.8rem; color: var(--error-color); margin-bottom: 20px;" id="lbl-password-warn">
+            * این رمز باید در گوشی شما و دوستتان دقیقاً یکسان باشد.
+        </p>
+
+        <label id="lbl-lang">زبان رابط کاربری:</label>
+        <select id="lang-select" onchange="changeLanguage()" style="width: 100%; padding: 12px; background: #2c2c2c; color: white; border: none; border-radius: 8px;">
+            <option value="fa">فارسی (راست‌چین)</option>
+            <option value="en">English (LTR)</option>
+        </select>
+    </div>
+</div>
+
+<script>
+    // دیکشنری زبان‌ها
+    const i18n = {
+        fa: {
+            title: "پیام‌رسان امن (AES-256)",
+            tab_encode: "کدگذاری", tab_decode: "کدشکن", tab_settings: "تنظیمات",
+            lbl_enc_input: "متن خود را وارد کنید:", btn_enc: "رمزگذاری",
+            lbl_enc_output: "متن رمزگذاری شده:", btn_copy: "کپی در کلیپ‌بورد",
+            lbl_dec_input: "کد را اینجا پیست کنید:", btn_dec: "رمزگشایی",
+            lbl_dec_output: "پیام اصلی:",
+            lbl_password: "رمز عبور مشترک (Secret Key):",
+            lbl_password_warn: "* این رمز باید در گوشی شما و دوستتان دقیقاً یکسان باشد.",
+            lbl_lang: "زبان رابط کاربری:",
+            err_empty: "لطفاً متن را وارد کنید!",
+            err_decode: "رمزگشایی شکست خورد! یا متن خراب است یا رمز عبور اشتباه است.",
+            alert_copy: "کپی شد!"
+        },
+        en: {
+            title: "SecureChat (AES-256)",
+            tab_encode: "Encode", tab_decode: "Decode", tab_settings: "Settings",
+            lbl_enc_input: "Enter your message:", btn_enc: "Encrypt",
+            lbl_enc_output: "Encrypted text:", btn_copy: "Copy to Clipboard",
+            lbl_dec_input: "Paste code here:", btn_dec: "Decrypt",
+            lbl_dec_output: "Original message:",
+            lbl_password: "Shared Secret Key:",
+            lbl_password_warn: "* This key must be exactly the same on both devices.",
+            lbl_lang: "UI Language:",
+            err_empty: "Please enter some text!",
+            err_decode: "Decryption failed! Invalid code or wrong password.",
+            alert_copy: "Copied!"
+        }
+    };
+
+    let currentLang = 'fa';
+
+    function switchTab(tabId) {
+        document.querySelectorAll('.tab-content').forEach(tab => tab.classList.remove('active'));
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        
+        document.getElementById(`tab-${tabId}`).classList.add('active');
+        document.getElementById(`tab-${tabId}-text`).classList.add('active');
+    }
+
+    function getSecretKey() {
+        return document.getElementById('secret-key').value;
+    }
+
+    // عملیات رمزگذاری (نظامی AES-256)
+    function encodeMessage() {
+        const text = document.getElementById('enc-input').value.trim();
+        if (!text) return alert(i18n[currentLang].err_empty);
+        
+        const key = getSecretKey();
+        // جادوی امنیت اینجاست: رمزگذاری با کتابخانه CryptoJS
+        const encrypted = CryptoJS.AES.encrypt(text, key).toString();
+        
+        document.getElementById('enc-output').value = encrypted;
+        document.getElementById('enc-result-box').style.display = 'block';
+    }
+
+    // عملیات رمزگشایی
+    function decodeMessage() {
+        const cipherText = document.getElementById('dec-input').value.trim();
+        if (!cipherText) return alert(i18n[currentLang].err_empty);
+        
+        const key = getSecretKey();
+        try {
+            // تلاش برای باز کردن کد
+            const decrypted = CryptoJS.AES.decrypt(cipherText, key);
+            const originalText = decrypted.toString(CryptoJS.enc.Utf8);
+            
+            if (!originalText) throw new Error("Wrong key or corrupt text");
+            
+            document.getElementById('dec-output').value = originalText;
+            document.getElementById('dec-result-box').style.display = 'block';
+        } catch (e) {
+            alert(i18n[currentLang].err_decode);
+            document.getElementById('dec-result-box').style.display = 'none';
+        }
+    }
+
+    function copyToClipboard(elementId) {
+        const copyText = document.getElementById(elementId);
+        copyText.select();
+        copyText.setSelectionRange(0, 99999); // برای موبایل
+        navigator.clipboard.writeText(copyText.value).then(() => {
+            alert(i18n[currentLang].alert_copy);
+        });
+    }
+
+    function changeLanguage() {
+        currentLang = document.getElementById('lang-select').value;
+        const t = i18n[currentLang];
+        
+        document.documentElement.dir = currentLang === 'fa' ? 'rtl' : 'ltr';
+        document.documentElement.lang = currentLang;
+
+        document.getElementById('app-title').innerText = t.title;
+        document.getElementById('tab-encode-text').innerText = t.tab_encode;
+        document.getElementById('tab-decode-text').innerText = t.tab_decode;
+        document.getElementById('tab-settings-text').innerText = t.tab_settings;
+        
+        document.getElementById('lbl-enc-input').innerText = t.lbl_enc_input;
+        document.getElementById('btn-enc').innerText = t.btn_enc;
+        document.getElementById('lbl-enc-output').innerText = t.lbl_enc_output;
+        document.getElementById('btn-enc-copy').innerText = t.btn_copy;
+        
+        document.getElementById('lbl-dec-input').innerText = t.lbl_dec_input;
+        document.getElementById('btn-dec').innerText = t.btn_dec;
+        document.getElementById('lbl-dec-output').innerText = t.lbl_dec_output;
+        document.getElementById('btn-dec-copy').innerText = t.btn_copy;
+        
+        document.getElementById('lbl-password').innerText = t.lbl_password;
+        document.getElementById('lbl-password-warn').innerText = t.lbl_password_warn;
+        document.getElementById('lbl-lang').innerText = t.lbl_lang;
+    }
+    // === سیستم حافظه محلی (Local Storage) ===
+    
+    // وقتی برنامه باز می‌شود، تنظیمات قبلی را از حافظه می‌خواند
+    window.onload = function() {
+        const savedKey = localStorage.getItem('secureChat_key');
+        if (savedKey) {
+            document.getElementById('secret-key').value = savedKey;
+        }
+
+        const savedLang = localStorage.getItem('secureChat_lang');
+        if (savedLang) {
+            document.getElementById('lang-select').value = savedLang;
+            changeLanguage(); // اعمال زبان ذخیره شده
+        }
+    };
+
+    // هر بار که رمز عبور را تایپ یا عوض می‌کنی، خودکار در گوشی ذخیره می‌شود
+    document.getElementById('secret-key').addEventListener('input', function(e) {
+        localStorage.setItem('secureChat_key', e.target.value);
+    });
+
+    // ذخیره زبان در صورت تغییر
+    document.getElementById('lang-select').addEventListener('change', function(e) {
+        localStorage.setItem('secureChat_lang', e.target.value);
+    });
+</script>
+</body>
+</html>
